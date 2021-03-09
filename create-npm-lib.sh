@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+GIT_URL="github.com/nnooney/hugolibs"
+
 function print_usage {
   cat <<EOF
 create-npm-lib Usage:
@@ -27,6 +29,9 @@ function main {
   fi
 
   cp -r "node_modules/$1" "$1"
+
+  cd "$1"
+  go mod init "$GIT_URL/$1"
 }
 
 main $@
