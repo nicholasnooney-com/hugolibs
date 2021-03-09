@@ -1,0 +1,6 @@
+# Dependency directories
+node_modules/
+
+# Ignore NPM config files since this repo doesn't have any dependencies.
+package.json
+package-lock.json
