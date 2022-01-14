@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-GIT_URL="github.com/nnooney/hugolibs"
+GIT_URL="github.com/nicholasnooney-com/hugolibs"
 
 function print_usage {
   cat <<EOF
