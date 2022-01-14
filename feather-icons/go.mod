@@ -1,3 +1,3 @@
 module github.com/nnooney/hugolibs/feather-icons
 
-go 1.15
+go 1.17

@@ -1,11 +1,11 @@
-// https://d3js.org v7.0.1 Copyright 2010-2021 Mike Bostock
+// https://d3js.org v7.3.0 Copyright 2010-2021 Mike Bostock
 (function (global, factory) {
 typeof exports === 'object' && typeof module !== 'undefined' ? factory(exports) :
 typeof define === 'function' && define.amd ? define(['exports'], factory) :
 (global = typeof globalThis !== 'undefined' ? globalThis : global || self, factory(global.d3 = global.d3 || {}));
-}(this, (function (exports) { 'use strict';
+})(this, (function (exports) { 'use strict';
 
-var version = "7.0.1";
+var version = "7.3.0";
 
 function ascending$3(a, b) {
   return a == null || b == null ? NaN : a < b ? -1 : a > b ? 1 : a >= b ? 0 : NaN;
@@ -16,7 +16,7 @@ function bisector(f) {
   let compare1 = f;
   let compare2 = f;
 
-  if (f.length === 1) {
+  if (f.length !== 2) {
     delta = (d, x) => f(d) - x;
     compare1 = ascending$3;
     compare2 = (d, x) => ascending$3(f(d), x);
@@ -332,7 +332,7 @@ function intern_set({_intern, _key}, value) {
 function intern_delete({_intern, _key}, value) {
   const key = _key(value);
   if (_intern.has(key)) {
-    value = _intern.get(value);
+    value = _intern.get(key);
     _intern.delete(key);
   }
   return value;
@@ -417,7 +417,7 @@ function sort(values, ...F) {
   if (typeof values[Symbol.iterator] !== "function") throw new TypeError("values is not iterable");
   values = Array.from(values);
   let [f] = F;
-  if ((f && f.length === 1) || F.length > 1) {
+  if ((f && f.length !== 2) || F.length > 1) {
     const index = Uint32Array.from(values, (d, i) => i);
     if (F.length > 1) {
       F = F.map(f => values.map(f));
@@ -433,10 +433,11 @@ function sort(values, ...F) {
     }
     return permute(values, index);
   }
-  return values.sort(f === undefined ? ascendingDefined : compareDefined(f));
+  return values.sort(compareDefined(f));
 }
 
-function compareDefined(compare) {
+function compareDefined(compare = ascending$3) {
+  if (compare === ascending$3) return ascendingDefined;
   if (typeof compare !== "function") throw new TypeError("compare is not a function");
   return (a, b) => {
     const x = compare(a, b);
@@ -450,7 +451,7 @@ function ascendingDefined(a, b) {
 }
 
 function groupSort(values, reduce, key) {
-  return (reduce.length === 1
+  return (reduce.length !== 2
     ? sort(rollup(values, reduce, key), (([ak, av], [bk, bv]) => ascending$3(av, bv) || ascending$3(ak, bk)))
     : sort(group(values, key), (([ak, av], [bk, bv]) => reduce(av, bv) || ascending$3(ak, bk))))
     .map(([key]) => key);
@@ -890,6 +891,28 @@ function range$2(start, stop, step) {
   return range;
 }
 
+function rank(values, valueof = ascending$3) {
+  if (typeof values[Symbol.iterator] !== "function") throw new TypeError("values is not iterable");
+  let V = Array.from(values);
+  const R = new Float64Array(V.length);
+  if (valueof.length !== 2) V = V.map(valueof), valueof = ascending$3;
+  const compareIndex = (i, j) => valueof(V[i], V[j]);
+  let k, r;
+  Uint32Array
+    .from(V, (_, i) => i)
+    .sort(valueof === ascending$3 ? (i, j) => ascendingDefined(V[i], V[j]) : compareDefined(compareIndex))
+    .forEach((j, i) => {
+      const c = compareIndex(j, k === undefined ? j : k);
+      if (c >= 0) {
+        if (k === undefined || c > 0) k = j, r = i;
+        R[j] = r;
+      } else {
+        R[j] = NaN;
+      }
+    });
+  return R;
+}
+
 function least(values, compare = ascending$3) {
   let min;
   let defined = false;
@@ -1097,7 +1120,7 @@ function reverse$1(values) {
 }
 
 function difference(values, ...others) {
-  values = new Set(values);
+  values = new InternSet(values);
   for (const other of others) {
     for (const value of other) {
       values.delete(value);
@@ -1107,7 +1130,7 @@ function difference(values, ...others) {
 }
 
 function disjoint(values, other) {
-  const iterator = other[Symbol.iterator](), set = new Set();
+  const iterator = other[Symbol.iterator](), set = new InternSet();
   for (const v of values) {
     if (set.has(v)) return false;
     let value, done;
@@ -1120,12 +1143,8 @@ function disjoint(values, other) {
   return true;
 }
 
-function set$2(values) {
-  return values instanceof Set ? values : new Set(values);
-}
-
 function intersection(values, ...others) {
-  values = new Set(values);
+  values = new InternSet(values);
   others = others.map(set$2);
   out: for (const value of values) {
     for (const other of others) {
@@ -1138,18 +1157,28 @@ function intersection(values, ...others) {
   return values;
 }
 
+function set$2(values) {
+  return values instanceof InternSet ? values : new InternSet(values);
+}
+
 function superset(values, other) {
   const iterator = values[Symbol.iterator](), set = new Set();
   for (const o of other) {
-    if (set.has(o)) continue;
+    const io = intern(o);
+    if (set.has(io)) continue;
     let value, done;
     while (({value, done} = iterator.next())) {
       if (done) return false;
-      set.add(value);
-      if (Object.is(o, value)) break;
+      const ivalue = intern(value);
+      set.add(ivalue);
+      if (Object.is(io, ivalue)) break;
     }
   }
   return true;
+}
+
+function intern(value) {
+  return value !== null && typeof value === "object" ? value.valueOf() : value;
 }
 
 function subset(values, other) {
@@ -1157,7 +1186,7 @@ function subset(values, other) {
 }
 
 function union(...others) {
-  const set = new Set();
+  const set = new InternSet();
   for (const other of others) {
     for (const o of other) {
       set.add(o);
@@ -8604,7 +8633,7 @@ function jiggle(random) {
   return (random() - 0.5) * 1e-6;
 }
 
-function x$3(d) {
+function x$4(d) {
   return d.x + d.vx;
 }
 
@@ -8631,7 +8660,7 @@ function collide(radius) {
         ri2;
 
     for (var k = 0; k < iterations; ++k) {
-      tree = quadtree(nodes, x$3, y$3).visitAfter(prepare);
+      tree = quadtree(nodes, x$4, y$3).visitAfter(prepare);
       for (i = 0; i < n; ++i) {
         node = nodes[i];
         ri = radii[node.index], ri2 = ri * ri;
@@ -8826,7 +8855,7 @@ function lcg$1() {
   return () => (s = (a$1 * s + c$3) % m) / m;
 }
 
-function x$2(d) {
+function x$3(d) {
   return d.x;
 }
 
@@ -8991,7 +9020,7 @@ function manyBody() {
       theta2 = 0.81;
 
   function force(_) {
-    var i, n = nodes.length, tree = quadtree(nodes, x$2, y$2).visitAfter(accumulate);
+    var i, n = nodes.length, tree = quadtree(nodes, x$3, y$2).visitAfter(accumulate);
     for (alpha = _, i = 0; i < n; ++i) node = nodes[i], tree.visit(apply);
   }
 
@@ -9147,7 +9176,7 @@ function radial$1(radius, x, y) {
   return force;
 }
 
-function x$1(x) {
+function x$2(x) {
   var strength = constant$4(0.1),
       nodes,
       strengths,
@@ -13365,7 +13394,8 @@ function partition() {
 }
 
 var preroot = {depth: -1},
-    ambiguous = {};
+    ambiguous = {},
+    imputed = {};
 
 function defaultId(d) {
   return d.id;
@@ -13377,11 +13407,14 @@ function defaultParentId(d) {
 
 function stratify() {
   var id = defaultId,
-      parentId = defaultParentId;
+      parentId = defaultParentId,
+      path;
 
   function stratify(data) {
     var nodes = Array.from(data),
-        n = nodes.length,
+        currentId = id,
+        currentParentId = parentId,
+        n,
         d,
         i,
         root,
@@ -13391,13 +13424,29 @@ function stratify() {
         nodeKey,
         nodeByKey = new Map;
 
-    for (i = 0; i < n; ++i) {
+    if (path != null) {
+      const I = nodes.map((d, i) => normalize$1(path(d, i, data)));
+      const P = I.map(parentof);
+      const S = new Set(I).add("");
+      for (const i of P) {
+        if (!S.has(i)) {
+          S.add(i);
+          I.push(i);
+          P.push(parentof(i));
+          nodes.push(imputed);
+        }
+      }
+      currentId = (_, i) => I[i];
+      currentParentId = (_, i) => P[i];
+    }
+
+    for (i = 0, n = nodes.length; i < n; ++i) {
       d = nodes[i], node = nodes[i] = new Node$1(d);
-      if ((nodeId = id(d, i, data)) != null && (nodeId += "")) {
+      if ((nodeId = currentId(d, i, data)) != null && (nodeId += "")) {
         nodeKey = node.id = nodeId;
         nodeByKey.set(nodeKey, nodeByKey.has(nodeKey) ? ambiguous : node);
       }
-      if ((nodeId = parentId(d, i, data)) != null && (nodeId += "")) {
+      if ((nodeId = currentParentId(d, i, data)) != null && (nodeId += "")) {
         node.parent = nodeId;
       }
     }
@@ -13418,6 +13467,20 @@ function stratify() {
     }
 
     if (!root) throw new Error("no root");
+
+    // When imputing internal nodes, only introduce roots if needed.
+    // Then replace the imputed marker data with null.
+    if (path != null) {
+      while (root.data === imputed && root.children.length === 1) {
+        root = root.children[0], --n;
+      }
+      for (let i = nodes.length - 1; i >= 0; --i) {
+        node = nodes[i];
+        if (node.data !== imputed) break;
+        node.data = null;
+      }
+    }
+
     root.parent = preroot;
     root.eachBefore(function(node) { node.depth = node.parent.depth + 1; --n; }).eachBefore(computeHeight);
     root.parent = null;
@@ -13427,14 +13490,50 @@ function stratify() {
   }
 
   stratify.id = function(x) {
-    return arguments.length ? (id = required(x), stratify) : id;
+    return arguments.length ? (id = optional(x), stratify) : id;
   };
 
   stratify.parentId = function(x) {
-    return arguments.length ? (parentId = required(x), stratify) : parentId;
+    return arguments.length ? (parentId = optional(x), stratify) : parentId;
+  };
+
+  stratify.path = function(x) {
+    return arguments.length ? (path = optional(x), stratify) : path;
   };
 
   return stratify;
+}
+
+// To normalize a path, we coerce to a string, strip the trailing slash if any
+// (as long as the trailing slash is not immediately preceded by another slash),
+// and add leading slash if missing.
+function normalize$1(path) {
+  path = `${path}`;
+  let i = path.length;
+  if (slash(path, i - 1) && !slash(path, i - 2)) path = path.slice(0, -1);
+  return path[0] === "/" ? path : `/${path}`;
+}
+
+// Walk backwards to find the first slash that is not the leading slash, e.g.:
+// "/foo/bar" ⇥ "/foo", "/foo" ⇥ "/", "/" ↦ "". (The root is special-cased
+// because the id of the root must be a truthy value.)
+function parentof(path) {
+  let i = path.length;
+  if (i < 2) return "";
+  while (--i > 1) if (slash(path, i)) break;
+  return path.slice(0, i);
+}
+
+// Slashes can be escaped; to determine whether a slash is a path delimiter, we
+// count the number of preceding backslashes escaping the forward slash: an odd
+// number indicates an escaped forward slash.
+function slash(path, i) {
+  if (path[i] === "/") {
+    let k = 0;
+    while (i > 0 && path[--i] === "\\") ++k;
+    if ((k & 1) === 0) return true;
+  }
+  return false;
 }
 
 function defaultSeparation(a, b) {
@@ -14848,28 +14947,26 @@ function pow10(x) {
 function powp(base) {
   return base === 10 ? pow10
       : base === Math.E ? Math.exp
-      : function(x) { return Math.pow(base, x); };
+      : x => Math.pow(base, x);
 }
 
 function logp(base) {
   return base === Math.E ? Math.log
       : base === 10 && Math.log10
       || base === 2 && Math.log2
-      || (base = Math.log(base), function(x) { return Math.log(x) / base; });
+      || (base = Math.log(base), x => Math.log(x) / base);
 }
 
 function reflect(f) {
-  return function(x) {
-    return -f(-x);
-  };
+  return (x, k) => -f(-x, k);
 }
 
 function loggish(transform) {
-  var scale = transform(transformLog, transformExp),
-      domain = scale.domain,
-      base = 10,
-      logs,
-      pows;
+  const scale = transform(transformLog, transformExp);
+  const domain = scale.domain;
+  let base = 10;
+  let logs;
+  let pows;
 
   function rescale() {
     logs = logp(base), pows = powp(base);
@@ -14890,34 +14987,33 @@ function loggish(transform) {
     return arguments.length ? (domain(_), rescale()) : domain();
   };
 
-  scale.ticks = function(count) {
-    var d = domain(),
-        u = d[0],
-        v = d[d.length - 1],
-        r;
+  scale.ticks = count => {
+    const d = domain();
+    let u = d[0];
+    let v = d[d.length - 1];
+    const r = v < u;
 
-    if (r = v < u) i = u, u = v, v = i;
+    if (r) ([u, v] = [v, u]);
 
-    var i = logs(u),
-        j = logs(v),
-        p,
-        k,
-        t,
-        n = count == null ? 10 : +count,
-        z = [];
+    let i = logs(u);
+    let j = logs(v);
+    let k;
+    let t;
+    const n = count == null ? 10 : +count;
+    let z = [];
 
     if (!(base % 1) && j - i < n) {
       i = Math.floor(i), j = Math.ceil(j);
       if (u > 0) for (; i <= j; ++i) {
-        for (k = 1, p = pows(i); k < base; ++k) {
-          t = p * k;
+        for (k = 1; k < base; ++k) {
+          t = i < 0 ? k / pows(-i) : k * pows(i);
           if (t < u) continue;
           if (t > v) break;
           z.push(t);
         }
       } else for (; i <= j; ++i) {
-        for (k = base - 1, p = pows(i); k >= 1; --k) {
-          t = p * k;
+        for (k = base - 1; k >= 1; --k) {
+          t = i > 0 ? k / pows(-i) : k * pows(i);
           if (t < u) continue;
           if (t > v) break;
           z.push(t);
@@ -14927,27 +15023,29 @@ function loggish(transform) {
     } else {
       z = ticks(i, j, Math.min(j - i, n)).map(pows);
     }
-
     return r ? z.reverse() : z;
   };
 
-  scale.tickFormat = function(count, specifier) {
-    if (specifier == null) specifier = base === 10 ? ".0e" : ",";
-    if (typeof specifier !== "function") specifier = exports.format(specifier);
-    if (count === Infinity) return specifier;
+  scale.tickFormat = (count, specifier) => {
     if (count == null) count = 10;
-    var k = Math.max(1, base * count / scale.ticks().length); // TODO fast estimate?
-    return function(d) {
-      var i = d / pows(Math.round(logs(d)));
+    if (specifier == null) specifier = base === 10 ? "s" : ",";
+    if (typeof specifier !== "function") {
+      if (!(base % 1) && (specifier = formatSpecifier(specifier)).precision == null) specifier.trim = true;
+      specifier = exports.format(specifier);
+    }
+    if (count === Infinity) return specifier;
+    const k = Math.max(1, base * count / scale.ticks().length); // TODO fast estimate?
+    return d => {
+      let i = d / pows(Math.round(logs(d)));
       if (i * base < base - 0.5) i *= base;
       return i <= k ? specifier(d) : "";
     };
   };
 
-  scale.nice = function() {
+  scale.nice = () => {
     return domain(nice(domain(), {
-      floor: function(x) { return pows(Math.floor(logs(x))); },
-      ceil: function(x) { return pows(Math.ceil(logs(x))); }
+      floor: x => pows(Math.floor(logs(x))),
+      ceil: x => pows(Math.ceil(logs(x)))
     }));
   };
 
@@ -14955,14 +15053,9 @@ function loggish(transform) {
 }
 
 function log() {
-  var scale = loggish(transformer$2()).domain([1, 10]);
-
-  scale.copy = function() {
-    return copy$1(scale, log()).base(scale.base());
-  };
-
+  const scale = loggish(transformer$2()).domain([1, 10]);
+  scale.copy = () => copy$1(scale, log()).base(scale.base());
   initRange.apply(scale, arguments);
-
   return scale;
 }
 
@@ -17093,18 +17186,18 @@ function constant$1(x) {
   };
 }
 
-var abs = Math.abs;
-var atan2 = Math.atan2;
-var cos = Math.cos;
-var max = Math.max;
-var min = Math.min;
-var sin = Math.sin;
-var sqrt = Math.sqrt;
+const abs = Math.abs;
+const atan2 = Math.atan2;
+const cos = Math.cos;
+const max = Math.max;
+const min = Math.min;
+const sin = Math.sin;
+const sqrt = Math.sqrt;
 
-var epsilon = 1e-12;
-var pi = Math.PI;
-var halfPi = pi / 2;
-var tau = 2 * pi;
+const epsilon = 1e-12;
+const pi = Math.PI;
+const halfPi = pi / 2;
+const tau = 2 * pi;
 
 function acos(x) {
   return x > 1 ? 0 : x < -1 ? pi : Math.acos(x);
@@ -17412,7 +17505,7 @@ function curveLinear(context) {
   return new Linear(context);
 }
 
-function x(p) {
+function x$1(p) {
   return p[0];
 }
 
@@ -17420,13 +17513,13 @@ function y(p) {
   return p[1];
 }
 
-function line(x$1, y$1) {
+function line(x, y$1) {
   var defined = constant$1(true),
       context = null,
       curve = curveLinear,
       output = null;
 
-  x$1 = typeof x$1 === "function" ? x$1 : (x$1 === undefined) ? x : constant$1(x$1);
+  x = typeof x === "function" ? x : (x === undefined) ? x$1 : constant$1(x);
   y$1 = typeof y$1 === "function" ? y$1 : (y$1 === undefined) ? y : constant$1(y$1);
 
   function line(data) {
@@ -17443,14 +17536,14 @@ function line(x$1, y$1) {
         if (defined0 = !defined0) output.lineStart();
         else output.lineEnd();
       }
-      if (defined0) output.point(+x$1(d, i, data), +y$1(d, i, data));
+      if (defined0) output.point(+x(d, i, data), +y$1(d, i, data));
     }
 
     if (buffer) return output = null, buffer + "" || null;
   }
 
   line.x = function(_) {
-    return arguments.length ? (x$1 = typeof _ === "function" ? _ : constant$1(+_), line) : x$1;
+    return arguments.length ? (x = typeof _ === "function" ? _ : constant$1(+_), line) : x;
   };
 
   line.y = function(_) {
@@ -17479,7 +17572,7 @@ function area(x0, y0, y1) {
       curve = curveLinear,
       output = null;
 
-  x0 = typeof x0 === "function" ? x0 : (x0 === undefined) ? x : constant$1(+x0);
+  x0 = typeof x0 === "function" ? x0 : (x0 === undefined) ? x$1 : constant$1(+x0);
   y0 = typeof y0 === "function" ? y0 : (y0 === undefined) ? constant$1(0) : constant$1(+y0);
   y1 = typeof y1 === "function" ? y1 : (y1 === undefined) ? y : constant$1(+y1);
 
@@ -17660,7 +17753,7 @@ function pie() {
   return pie;
 }
 
-var curveRadialLinear = curveRadial$1(curveLinear);
+var curveRadialLinear = curveRadial(curveLinear);
 
 function Radial(curve) {
   this._curve = curve;
@@ -17684,7 +17777,7 @@ Radial.prototype = {
   }
 };
 
-function curveRadial$1(curve) {
+function curveRadial(curve) {
 
   function radial(context) {
     return new Radial(curve(context));
@@ -17702,7 +17795,7 @@ function lineRadial(l) {
   l.radius = l.y, delete l.y;
 
   l.curve = function(_) {
-    return arguments.length ? c(curveRadial$1(_)) : c()._curve;
+    return arguments.length ? c(curveRadial(_)) : c()._curve;
   };
 
   return l;
@@ -17732,7 +17825,7 @@ function areaRadial() {
   a.lineOuterRadius = function() { return lineRadial(y1()); }, delete a.lineY1;
 
   a.curve = function(_) {
-    return arguments.length ? c(curveRadial$1(_)) : c()._curve;
+    return arguments.length ? c(curveRadial(_)) : c()._curve;
   };
 
   return a;
@@ -17740,6 +17833,79 @@ function areaRadial() {
 
 function pointRadial(x, y) {
   return [(y = +y) * Math.cos(x -= Math.PI / 2), y * Math.sin(x)];
+}
+
+class Bump {
+  constructor(context, x) {
+    this._context = context;
+    this._x = x;
+  }
+  areaStart() {
+    this._line = 0;
+  }
+  areaEnd() {
+    this._line = NaN;
+  }
+  lineStart() {
+    this._point = 0;
+  }
+  lineEnd() {
+    if (this._line || (this._line !== 0 && this._point === 1)) this._context.closePath();
+    this._line = 1 - this._line;
+  }
+  point(x, y) {
+    x = +x, y = +y;
+    switch (this._point) {
+      case 0: {
+        this._point = 1;
+        if (this._line) this._context.lineTo(x, y);
+        else this._context.moveTo(x, y);
+        break;
+      }
+      case 1: this._point = 2; // falls through
+      default: {
+        if (this._x) this._context.bezierCurveTo(this._x0 = (this._x0 + x) / 2, this._y0, this._x0, y, x, y);
+        else this._context.bezierCurveTo(this._x0, this._y0 = (this._y0 + y) / 2, x, this._y0, x, y);
+        break;
+      }
+    }
+    this._x0 = x, this._y0 = y;
+  }
+}
+
+class BumpRadial {
+  constructor(context) {
+    this._context = context;
+  }
+  lineStart() {
+    this._point = 0;
+  }
+  lineEnd() {}
+  point(x, y) {
+    x = +x, y = +y;
+    if (this._point++ === 0) {
+      this._x0 = x, this._y0 = y;
+    } else {
+      const p0 = pointRadial(this._x0, this._y0);
+      const p1 = pointRadial(this._x0, this._y0 = (this._y0 + y) / 2);
+      const p2 = pointRadial(x, this._y0);
+      const p3 = pointRadial(x, y);
+      this._context.moveTo(...p0);
+      this._context.bezierCurveTo(...p1, ...p2, ...p3);
+    }
+  }
+}
+
+function bumpX(context) {
+  return new Bump(context, true);
+}
+
+function bumpY(context) {
+  return new Bump(context, false);
+}
+
+function bumpRadial(context) {
+  return new BumpRadial(context);
 }
 
 function linkSource(d) {
@@ -17751,17 +17917,24 @@ function linkTarget(d) {
 }
 
 function link(curve) {
-  var source = linkSource,
-      target = linkTarget,
-      x$1 = x,
-      y$1 = y,
-      context = null;
+  let source = linkSource;
+  let target = linkTarget;
+  let x = x$1;
+  let y$1 = y;
+  let context = null;
+  let output = null;
 
   function link() {
-    var buffer, argv = slice.call(arguments), s = source.apply(this, argv), t = target.apply(this, argv);
-    if (!context) context = buffer = path();
-    curve(context, +x$1.apply(this, (argv[0] = s, argv)), +y$1.apply(this, argv), +x$1.apply(this, (argv[0] = t, argv)), +y$1.apply(this, argv));
-    if (buffer) return context = null, buffer + "" || null;
+    let buffer;
+    const argv = slice.call(arguments);
+    const s = source.apply(this, argv);
+    const t = target.apply(this, argv);
+    if (context == null) output = curve(buffer = path());
+    output.lineStart();
+    argv[0] = s, output.point(+x.apply(this, argv), +y$1.apply(this, argv));
+    argv[0] = t, output.point(+x.apply(this, argv), +y$1.apply(this, argv));
+    output.lineEnd();
+    if (buffer) return output = null, buffer + "" || null;
   }
 
   link.source = function(_) {
@@ -17773,7 +17946,7 @@ function link(curve) {
   };
 
   link.x = function(_) {
-    return arguments.length ? (x$1 = typeof _ === "function" ? _ : constant$1(+_), link) : x$1;
+    return arguments.length ? (x = typeof _ === "function" ? _ : constant$1(+_), link) : x;
   };
 
   link.y = function(_) {
@@ -17781,57 +17954,54 @@ function link(curve) {
   };
 
   link.context = function(_) {
-    return arguments.length ? ((context = _ == null ? null : _), link) : context;
+    return arguments.length ? (_ == null ? context = output = null : output = curve(context = _), link) : context;
   };
 
   return link;
 }
 
-function curveHorizontal(context, x0, y0, x1, y1) {
-  context.moveTo(x0, y0);
-  context.bezierCurveTo(x0 = (x0 + x1) / 2, y0, x0, y1, x1, y1);
-}
-
-function curveVertical(context, x0, y0, x1, y1) {
-  context.moveTo(x0, y0);
-  context.bezierCurveTo(x0, y0 = (y0 + y1) / 2, x1, y0, x1, y1);
-}
-
-function curveRadial(context, x0, y0, x1, y1) {
-  var p0 = pointRadial(x0, y0),
-      p1 = pointRadial(x0, y0 = (y0 + y1) / 2),
-      p2 = pointRadial(x1, y0),
-      p3 = pointRadial(x1, y1);
-  context.moveTo(p0[0], p0[1]);
-  context.bezierCurveTo(p1[0], p1[1], p2[0], p2[1], p3[0], p3[1]);
-}
-
 function linkHorizontal() {
-  return link(curveHorizontal);
+  return link(bumpX);
 }
 
 function linkVertical() {
-  return link(curveVertical);
+  return link(bumpY);
 }
 
 function linkRadial() {
-  var l = link(curveRadial);
+  const l = link(bumpRadial);
   l.angle = l.x, delete l.x;
   l.radius = l.y, delete l.y;
   return l;
 }
 
+const sqrt3$2 = sqrt(3);
+
+var asterisk = {
+  draw(context, size) {
+    const r = sqrt(size + min(size / 28, 0.75)) * 0.59436;
+    const t = r / 2;
+    const u = t * sqrt3$2;
+    context.moveTo(0, r);
+    context.lineTo(0, -r);
+    context.moveTo(-u, -t);
+    context.lineTo(u, t);
+    context.moveTo(-u, t);
+    context.lineTo(u, -t);
+  }
+};
+
 var circle = {
-  draw: function(context, size) {
-    var r = Math.sqrt(size / pi);
+  draw(context, size) {
+    const r = sqrt(size / pi);
     context.moveTo(r, 0);
     context.arc(0, 0, r, 0, tau);
   }
 };
 
 var cross = {
-  draw: function(context, size) {
-    var r = Math.sqrt(size / 5) / 2;
+  draw(context, size) {
+    const r = sqrt(size / 5) / 2;
     context.moveTo(-3 * r, -r);
     context.lineTo(-r, -r);
     context.lineTo(-r, -3 * r);
@@ -17848,13 +18018,13 @@ var cross = {
   }
 };
 
-var tan30 = Math.sqrt(1 / 3),
-    tan30_2 = tan30 * 2;
+const tan30 = sqrt(1 / 3);
+const tan30_2 = tan30 * 2;
 
 var diamond = {
-  draw: function(context, size) {
-    var y = Math.sqrt(size / tan30_2),
-        x = y * tan30;
+  draw(context, size) {
+    const y = sqrt(size / tan30_2);
+    const x = y * tan30;
     context.moveTo(0, -y);
     context.lineTo(x, 0);
     context.lineTo(0, y);
@@ -17863,22 +18033,62 @@ var diamond = {
   }
 };
 
-var ka = 0.89081309152928522810,
-    kr = Math.sin(pi / 10) / Math.sin(7 * pi / 10),
-    kx = Math.sin(tau / 10) * kr,
-    ky = -Math.cos(tau / 10) * kr;
+var diamond2 = {
+  draw(context, size) {
+    const r = sqrt(size) * 0.62625;
+    context.moveTo(0, -r);
+    context.lineTo(r, 0);
+    context.lineTo(0, r);
+    context.lineTo(-r, 0);
+    context.closePath();
+  }
+};
+
+var plus = {
+  draw(context, size) {
+    const r = sqrt(size - min(size / 7, 2)) * 0.87559;
+    context.moveTo(-r, 0);
+    context.lineTo(r, 0);
+    context.moveTo(0, r);
+    context.lineTo(0, -r);
+  }
+};
+
+var square = {
+  draw(context, size) {
+    const w = sqrt(size);
+    const x = -w / 2;
+    context.rect(x, x, w, w);
+  }
+};
+
+var square2 = {
+  draw(context, size) {
+    const r = sqrt(size) * 0.4431;
+    context.moveTo(r, r);
+    context.lineTo(r, -r);
+    context.lineTo(-r, -r);
+    context.lineTo(-r, r);
+    context.closePath();
+  }
+};
+
+const ka = 0.89081309152928522810;
+const kr = sin(pi / 10) / sin(7 * pi / 10);
+const kx = sin(tau / 10) * kr;
+const ky = -cos(tau / 10) * kr;
 
 var star = {
-  draw: function(context, size) {
-    var r = Math.sqrt(size * ka),
-        x = kx * r,
-        y = ky * r;
+  draw(context, size) {
+    const r = sqrt(size * ka);
+    const x = kx * r;
+    const y = ky * r;
     context.moveTo(0, -r);
     context.lineTo(x, y);
-    for (var i = 1; i < 5; ++i) {
-      var a = tau * i / 5,
-          c = Math.cos(a),
-          s = Math.sin(a);
+    for (let i = 1; i < 5; ++i) {
+      const a = tau * i / 5;
+      const c = cos(a);
+      const s = sin(a);
       context.lineTo(s * r, -c * r);
       context.lineTo(c * x - s * y, s * x + c * y);
     }
@@ -17886,40 +18096,43 @@ var star = {
   }
 };
 
-var square = {
-  draw: function(context, size) {
-    var w = Math.sqrt(size),
-        x = -w / 2;
-    context.rect(x, x, w, w);
-  }
-};
-
-var sqrt3 = Math.sqrt(3);
+const sqrt3$1 = sqrt(3);
 
 var triangle = {
-  draw: function(context, size) {
-    var y = -Math.sqrt(size / (sqrt3 * 3));
+  draw(context, size) {
+    const y = -sqrt(size / (sqrt3$1 * 3));
     context.moveTo(0, y * 2);
-    context.lineTo(-sqrt3 * y, -y);
-    context.lineTo(sqrt3 * y, -y);
+    context.lineTo(-sqrt3$1 * y, -y);
+    context.lineTo(sqrt3$1 * y, -y);
     context.closePath();
   }
 };
 
-var c = -0.5,
-    s = Math.sqrt(3) / 2,
-    k = 1 / Math.sqrt(12),
-    a = (k / 2 + 1) * 3;
+const sqrt3 = sqrt(3);
+
+var triangle2 = {
+  draw(context, size) {
+    const s = sqrt(size) * 0.6824;
+    const t = s  / 2;
+    const u = (s * sqrt3) / 2; // cos(Math.PI / 6)
+    context.moveTo(0, -s);
+    context.lineTo(u, t);
+    context.lineTo(-u, t);
+    context.closePath();
+  }
+};
+
+const c = -0.5;
+const s = sqrt(3) / 2;
+const k = 1 / sqrt(12);
+const a = (k / 2 + 1) * 3;
 
 var wye = {
-  draw: function(context, size) {
-    var r = Math.sqrt(size / a),
-        x0 = r / 2,
-        y0 = r * k,
-        x1 = x0,
-        y1 = r * k + r,
-        x2 = -x1,
-        y2 = y1;
+  draw(context, size) {
+    const r = sqrt(size / a);
+    const x0 = r / 2, y0 = r * k;
+    const x1 = x0, y1 = r * k + r;
+    const x2 = -x1, y2 = y1;
     context.moveTo(x0, y0);
     context.lineTo(x1, y1);
     context.lineTo(x2, y2);
@@ -17933,7 +18146,18 @@ var wye = {
   }
 };
 
-var symbols = [
+var x = {
+  draw(context, size) {
+    const r = sqrt(size - min(size / 6, 1.7)) * 0.6189;
+    context.moveTo(-r, -r);
+    context.lineTo(r, r);
+    context.moveTo(-r, r);
+    context.lineTo(r, -r);
+  }
+};
+
+// These symbols are designed to be filled.
+const symbolsFill = [
   circle,
   cross,
   diamond,
@@ -17943,13 +18167,25 @@ var symbols = [
   wye
 ];
 
-function symbol(type, size) {
-  var context = null;
+// These symbols are designed to be stroked (with a width of 1.5px and round caps).
+const symbolsStroke = [
+  circle,
+  plus,
+  x,
+  triangle2,
+  asterisk,
+  square2,
+  diamond2
+];
+
+function Symbol$1(type, size) {
+  let context = null;
+
   type = typeof type === "function" ? type : constant$1(type || circle);
   size = typeof size === "function" ? size : constant$1(size === undefined ? 64 : +size);
 
   function symbol() {
-    var buffer;
+    let buffer;
     if (!context) context = buffer = path();
     type.apply(this, arguments).draw(context, +size.apply(this, arguments));
     if (buffer) return context = null, buffer + "" || null;
@@ -18110,52 +18346,6 @@ BasisOpen.prototype = {
 
 function basisOpen(context) {
   return new BasisOpen(context);
-}
-
-class Bump {
-  constructor(context, x) {
-    this._context = context;
-    this._x = x;
-  }
-  areaStart() {
-    this._line = 0;
-  }
-  areaEnd() {
-    this._line = NaN;
-  }
-  lineStart() {
-    this._point = 0;
-  }
-  lineEnd() {
-    if (this._line || (this._line !== 0 && this._point === 1)) this._context.closePath();
-    this._line = 1 - this._line;
-  }
-  point(x, y) {
-    x = +x, y = +y;
-    switch (this._point) {
-      case 0: {
-        this._point = 1;
-        if (this._line) this._context.lineTo(x, y);
-        else this._context.moveTo(x, y);
-        break;
-      }
-      case 1: this._point = 2; // falls through
-      default: {
-        if (this._x) this._context.bezierCurveTo(this._x0 = (this._x0 + x) / 2, this._y0, this._x0, y, x, y);
-        else this._context.bezierCurveTo(this._x0, this._y0 = (this._y0 + y) / 2, x, this._y0, x, y);
-        break;
-      }
-    }
-    this._x0 = x, this._y0 = y;
-  }
-}
-
-function bumpX(context) {
-  return new Bump(context, true);
-}
-
-function bumpY(context) {
-  return new Bump(context, false);
 }
 
 function Bundle(context, beta) {
@@ -19675,7 +19865,7 @@ exports.forceLink = link$2;
 exports.forceManyBody = manyBody;
 exports.forceRadial = radial$1;
 exports.forceSimulation = simulation;
-exports.forceX = x$1;
+exports.forceX = x$2;
 exports.forceY = y$1;
 exports.formatDefaultLocale = defaultLocale$1;
 exports.formatLocale = formatLocale$1;
@@ -19819,6 +20009,7 @@ exports.least = least;
 exports.leastIndex = leastIndex;
 exports.line = line;
 exports.lineRadial = lineRadial$1;
+exports.link = link;
 exports.linkHorizontal = linkHorizontal;
 exports.linkRadial = linkRadial;
 exports.linkVertical = linkVertical;
@@ -19883,6 +20074,7 @@ exports.randomPoisson = poisson;
 exports.randomUniform = uniform;
 exports.randomWeibull = weibull;
 exports.range = range$2;
+exports.rank = rank;
 exports.reduce = reduce;
 exports.reverse = reverse$1;
 exports.rgb = rgb;
@@ -19982,15 +20174,23 @@ exports.subset = subset;
 exports.sum = sum$2;
 exports.superset = superset;
 exports.svg = svg;
-exports.symbol = symbol;
+exports.symbol = Symbol$1;
+exports.symbolAsterisk = asterisk;
 exports.symbolCircle = circle;
 exports.symbolCross = cross;
 exports.symbolDiamond = diamond;
+exports.symbolDiamond2 = diamond2;
+exports.symbolPlus = plus;
 exports.symbolSquare = square;
+exports.symbolSquare2 = square2;
 exports.symbolStar = star;
 exports.symbolTriangle = triangle;
+exports.symbolTriangle2 = triangle2;
 exports.symbolWye = wye;
-exports.symbols = symbols;
+exports.symbolX = x;
+exports.symbols = symbolsFill;
+exports.symbolsFill = symbolsFill;
+exports.symbolsStroke = symbolsStroke;
 exports.text = text;
 exports.thresholdFreedmanDiaconis = thresholdFreedmanDiaconis;
 exports.thresholdScott = thresholdScott;
@@ -20099,4 +20299,4 @@ exports.zoomTransform = transform;
 
 Object.defineProperty(exports, '__esModule', { value: true });
 
-})));
+}));
